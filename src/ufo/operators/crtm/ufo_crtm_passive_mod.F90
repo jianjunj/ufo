@@ -350,6 +350,17 @@ do jvar = 1, hofxdiags%nvar
             deallocate(Tao)
             deallocate(Wfunc)
 
+         ! variable: surface_emissivity_CH
+         case (var_sfc_emiss)
+            hofxdiags%geovals(jvar)%nval = 1
+            allocate(hofxdiags%geovals(jvar)%vals(hofxdiags%geovals(jvar)%nval, n_Profiles))
+            hofxdiags%geovals(jvar)%vals = missing
+            do jprofile = 1, n_Profiles
+               if (.not. Options(jprofile)%Skip_Profile) then
+                  hofxdiags%geovals(jvar)%vals(1, jprofile) = &
+                     rts(jchannel, jprofile) % surface_emissivity
+               end if
+            end do
          case default
 !           write(err_msg,*) 'ufo_radiancecrtm_simobs: //&
 !                             & ObsDiagnostic is unsupported, ', &

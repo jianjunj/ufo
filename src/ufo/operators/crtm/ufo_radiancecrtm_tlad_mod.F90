@@ -11,6 +11,7 @@ module ufo_radiancecrtm_tlad_mod
  use CRTM_Module
 
  use fckit_configuration_module, only: fckit_configuration
+ use fckit_exception_module, only: fckit_exception
  use fckit_mpi_module,   only: fckit_mpi_comm
  use, intrinsic :: iso_c_binding
  use kinds
@@ -280,6 +281,11 @@ integer, allocatable :: zeroCloudInCRTM0(:)
    else
       Is_Vis_or_UV = .false.
    end if
+   if (size(self%conf_traj%clear_sky_channels) > 0) then
+     if (SC(isc)%Is_Active_Sensor .or. Is_Vis_or_UV .or. self%conf%read_Cmatrix) then
+       call fckit_exception%throw("clear sky channels supports passive microwave/IR without C-matrix")
+     end if
+   end if
 
    !Assign the data from the GeoVaLs
    !--------------------------------
@@ -289,7 +295,6 @@ integer, allocatable :: zeroCloudInCRTM0(:)
                                Is_Vis_or_UV, zeroCloudInCRTM0)
    call ufo_crtm_load_atm_data(self%n_Profiles, self%n_Layers, geovals, atm, self%conf_traj, &
                                SC(isc)%Is_Active_Sensor, zeroCloudInCRTM0)
-   deallocate(zeroCloudInCRTM0)
    if (self%conf%SENSOR_ID(n) == "gmi_gpm") then
       allocate( geo_hf( self%n_Profiles ))
       call ufo_crtm_load_geom_data(obss,geo,geo_hf,self%conf%SENSOR_ID(n))
@@ -371,6 +376,10 @@ integer, allocatable :: zeroCloudInCRTM0(:)
       message = "Error calling CRTM (setTraj) K-Matrix Model for "//self%conf_traj%SENSOR_ID(n)
       call ufo_crtm_comm_stat_check(err_stat, PROGRAM_NAME, message, f_comm)
    end if
+
+   call ufo_crtm_mixed_sky(self%conf_traj, self%channels, atm, sfc, geo, chinfo(n:n), &
+                           self%Options, rts, f_comm, zeroCloudInCRTM0, geo_hf, atm_K, sfc_K, rts_K)
+   deallocate(zeroCloudInCRTM0)
 
    ! check for NaN values in atm_k: skip the profile at its first NaN
    numNaN = 0

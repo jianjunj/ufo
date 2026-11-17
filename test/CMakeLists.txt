@@ -229,6 +229,11 @@ ecbuild_add_executable( TARGET  test_ObsOperatorShared.x
                         LIBS    ufo
                        )
 
+ecbuild_add_executable( TARGET  test_CRTMixedSky.x
+                        SOURCES mains/TestCRTMixedSky.cc
+                        LIBS    ufo
+                       )
+
 ecbuild_add_executable( TARGET  test_ObsFilters.x
                         SOURCES mains/TestObsFilters.cc
                         LIBS    ufo

@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "eckit/config/LocalConfiguration.h"
 #include "oops/util/parameters/OptionalParameter.h"
 #include "oops/util/parameters/Parameter.h"
 #include "oops/util/parameters/Parameters.h"
@@ -139,6 +140,11 @@ namespace ufo
           407.0, this};
     /// Clouds
     oops::OptionalParameter<std::vector<std::string> > Clouds{"Clouds", this};
+    /// Simulate these channels without clouds (for example "1, 4-6"), while the other
+    /// channels use Clouds. Their cloud Jacobians are zero. Omit to use Clouds for all
+    /// channels. Requires Clouds and passive microwave/IR without reconstructed radiances.
+    /// MetaData/zeroCloudInCRTM still applies to all channels at the selected locations.
+    oops::OptionalParameter<std::string> ClearSkyChannels{"clear sky channels", this};
     /// Cloud_Fraction
     oops::OptionalParameter<float> Cloud_Fraction{"Cloud_Fraction", this};
     /// Cloud_Seeding
@@ -170,6 +176,10 @@ namespace ufo
     /// Write reduced GeoVaLs after FOV averaging
     oops::OptionalParameter<eckit::LocalConfiguration> gvOut{"reduced geovals output", this};
   };  // end class ObsRadianceCRTMParameters
+
+  /// Expand and validate the channel selection before passing it to Fortran.
+  eckit::LocalConfiguration crtmConfig(const ObsRadianceCRTMParameters &,
+                                         const std::vector<int> &);
 
 }  // namespace ufo
 

@@ -125,8 +125,11 @@ void testMixedSkyTLADMask() {
 
   ufo::LinearObsOperator linear(space.obsspace(),
                                 conf.getSubConfiguration("obs operator"));
+  oops::ObsOperator<ObsTraits> nonlinear(space, conf.getSubConfiguration("obs operator"));
+  oops::Variables trajectoryVars = nonlinear.requiredVars();
+  trajectoryVars += linear.requiredVars();
   ufo::GeoVaLs trajectory(conf.getSubConfiguration("geovals"), space.obsspace(),
-                          linear.requiredVars());
+                          trajectoryVars);
   ufo::ObsBias linearBias(space.obsspace(),
                           conf.getSubConfiguration("obs bias"));
   ufo::ObsBiasIncrement biasIncrement(space.obsspace(),

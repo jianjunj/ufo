@@ -112,6 +112,16 @@ void testMixedSky() {
       }
     }
   }
+}
+
+void testMixedSkyTLADMask() {
+  typedef ::test::ObsTestsFixture<ObsTraits> Fixture;
+  const auto conf = ::test::TestEnvironment::config().getSubConfigurations("observations")[0];
+  const auto & space = Fixture::obspace()[0];
+  const auto channels = space.assimvariables().channels();
+  std::vector<int> zeroCloud(space.obsspace().nlocs(), 0);
+  for (size_t loc = 0; loc < zeroCloud.size(); loc += 2) zeroCloud[loc] = 1;
+  space.obsspace().put_db("MetaData", "zeroCloudInCRTM", zeroCloud);
 
   ufo::LinearObsOperator linear(space.obsspace(),
                                 conf.getSubConfiguration("obs operator"));
@@ -121,6 +131,7 @@ void testMixedSky() {
                           conf.getSubConfiguration("obs bias"));
   ufo::ObsBiasIncrement biasIncrement(space.obsspace(),
                                       conf.getSubConfiguration("obs bias"));
+  ioda::ObsDataVector<int> qc(space.obsspace(), space.obsspace().obsvariables());
   linear.setTrajectory(trajectory, linearBias, qc);
 
   ufo::GeoVaLs cloudWaterIncrement(trajectory);
@@ -143,7 +154,7 @@ void testMixedSky() {
   const auto channelTwo = std::find(channels.begin(), channels.end(), 2);
   ASSERT(channelTwo != channels.end());
   const size_t channelTwoIndex = std::distance(channels.begin(), channelTwo);
-  for (size_t loc = 0; loc < mixedVec.nlocs(); ++loc) {
+  for (size_t loc = 0; loc < zeroCloud.size(); ++loc) {
     adjointValues[loc * channels.size() + channelTwoIndex] = 1.0;
   }
   ufo::GeoVaLs cloudWaterAdjoint(trajectory);
@@ -155,7 +166,7 @@ void testMixedSky() {
                                                        profilesByLocation);
   double unmaskedTL = 0.0;
   double unmaskedAD = 0.0;
-  for (size_t loc = 0; loc < mixedVec.nlocs(); ++loc) {
+  for (size_t loc = 0; loc < zeroCloud.size(); ++loc) {
     const size_t channelIndex = loc * channels.size() + channelTwoIndex;
     if (zeroCloud[loc]) {
       for (size_t ch = 0; ch < channels.size(); ++ch) {
@@ -191,6 +202,8 @@ class CRTMixedSky : public oops::Test {
   void register_tests() const override {
     eckit::testing::specification().emplace_back(CASE("ufo/CRTMixedSky")
       { testMixedSky(); });
+    eckit::testing::specification().emplace_back(CASE("ufo/CRTMixedSky/TLADMask")
+      { testMixedSkyTLADMask(); });
   }
   void clear() const override {Fixture::reset();}
 };

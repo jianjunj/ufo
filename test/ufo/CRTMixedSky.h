@@ -25,7 +25,7 @@
 #include "oops/interface/ObsDataVector.h"
 #include "oops/interface/ObsDiagnostics.h"
 #include "oops/interface/ObsOperator.h"
-#include "oops/interface/ObsVector.h"
+#include "oops/base/ObsVector.h"
 #include "oops/runs/Test.h"
 #include "oops/util/Expect.h"
 #include "oops/util/missingValues.h"

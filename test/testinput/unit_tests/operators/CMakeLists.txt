@@ -1598,6 +1598,24 @@ endif( crtm_FOUND AND crtm_VERSION VERSION_GREATER_EQUAL 3.0.0 )
               LABELS  crtm operators
               WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/../../../ )
 #
+    ufo_add_test( NAME    opr_amsua_crtm_mixed_sky
+              ECBUILD
+              COMMAND ${CMAKE_BINARY_DIR}/bin/test_CRTMixedSky.x
+              ARGS    "${CMAKE_CURRENT_SOURCE_DIR}/amsua_crtm_mixed_sky.yaml"
+              MPI     1
+              LIBS    ufo
+              LABELS  crtm operators
+              WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/../../../ )
+#
+    ufo_add_test( NAME    linopr_amsua_crtm_mixed_sky
+              ECBUILD
+              COMMAND ${CMAKE_BINARY_DIR}/bin/test_ObsOperatorTLAD.x
+              ARGS    "${CMAKE_CURRENT_SOURCE_DIR}/amsua_crtm_mixed_sky.yaml"
+              MPI     1
+              LIBS    ufo
+              LABELS  crtm operators
+              WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/../../../ )
+#
     ufo_add_test( NAME    linopr_amsua_crtm
               ECBUILD
               COMMAND ${CMAKE_BINARY_DIR}/bin/test_ObsOperatorTLAD.x

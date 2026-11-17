@@ -68,7 +68,7 @@ ObsRadianceCRTMTLAD::ObsRadianceCRTMTLAD(const ioda::ObsSpace & odb,
                                                               std::stoi(month),
                                                               std::stoi(day));
 
-  eckit::LocalConfiguration conf = params.toConfiguration();
+  eckit::LocalConfiguration conf = crtmConfig(params, channels_list);
   if (params.LinearObsOperator.value() != boost::none) {
     nullifyJacParamSetup(params.LinearObsOperator.value().value(), conf);
   }

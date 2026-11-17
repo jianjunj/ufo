@@ -1,0 +1,46 @@
+time window:
+  begin: 2018-04-14T21:00:00Z
+  end: 2018-04-15T03:00:00Z
+  bound to include: begin
+
+observations:
+- obs operator:
+    name: CRTM
+    Absorbers: [H2O, O3, CO2]
+    Clouds: [Water, Ice]
+    Cloud_Fraction: 1.0
+    SurfaceWindGeoVars: uv
+    clear sky channels: 1,4,14-15
+    linear obs operator:
+      Absorbers: [H2O, O3, CO2]
+      Clouds: [Water, Ice]
+    obs options: &crtm_options
+      Sensor_ID: amsua_n19
+      EndianType: little_endian
+      CoefficientPath: Data/
+  cloudy obs operator:
+    name: CRTM
+    Absorbers: [H2O, O3, CO2]
+    Clouds: [Water, Ice]
+    Cloud_Fraction: 1.0
+    SurfaceWindGeoVars: uv
+    obs options: *crtm_options
+  clear obs operator:
+    name: CRTM
+    Absorbers: [H2O, O3, CO2]
+    SurfaceWindGeoVars: uv
+    obs options: *crtm_options
+  obs space:
+    name: amsua_n19
+    obsdatain:
+      engine:
+        type: H5File
+        obsfile: Data/ufo/testinput_tier_1/amsua_n19_obs_2018041500_m_qc.nc4
+    simulated variables: [brightnessTemperature]
+    channels: 1-15
+  geovals:
+    filename: Data/ufo/testinput_tier_1/amsua_n19_geoval_2018041500_m_qc.nc4
+  linear obs operator test:
+    coef TL: 1.e-3
+    tolerance TL: 1.e-3
+    tolerance AD: 1.e-11

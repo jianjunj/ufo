@@ -52,6 +52,7 @@ public ufo_crtm_load_geom_data
 public ufo_crtm_pressure_is_monotonic
 public ufo_crtm_skip_profiles
 public ufo_crtm_skip_qc_profiles
+public ufo_crtm_mixed_sky
 
 public ufo_crtm_load_aerosol_data
 public ufo_crtm_assign_aerosol_names
@@ -138,6 +139,7 @@ type crtm_conf
  ! nullifyJacVars(i) is zeroed for channels in nullifyJacChannels(i)%channels
  character(len=MAXVARLEN), allocatable :: nullifyJacVars(:)
  type(nullify_jac_channels_type), allocatable :: nullifyJacChannels(:)
+ integer, allocatable :: clear_sky_channels(:)
  logical :: Cloud_Seeding = .false.
  logical :: cal_cloud_frac_in_fov = .false.
  logical :: cal_cloud_reff_in_fov  = .false.
@@ -375,6 +377,11 @@ logical, save :: message_flag = .true.
 
  ! Clouds
  !-------
+ if (f_confOper%has("clear sky channels")) then
+   call f_confOper%get_or_die("clear sky channels", conf%clear_sky_channels)
+ else
+   allocate(conf%clear_sky_channels(0))
+ end if
  conf%n_Clouds = 0
  if (f_confOper%has("Clouds")) conf%n_Clouds = f_confOper%get_size("Clouds")
  allocate( conf%Clouds  ( conf%n_Clouds,2), &
@@ -775,6 +782,7 @@ type(crtm_conf), intent(inout) :: conf
  deallocate(conf%Aerosols)
  deallocate(conf%nullifyJacVars)
  deallocate(conf%nullifyJacChannels)
+ deallocate(conf%clear_sky_channels)
 
 end subroutine ufo_crtm_conf_delete
 
@@ -1409,6 +1417,152 @@ character(len=max_string) :: rank_message, fmessage
  end if
 
 end subroutine ufo_crtm_comm_stat_check
+
+! ------------------------------------------------------------------------------
+
+!> Replace selected channels with a cloud-free CRTM calculation.
+!> The optional K-matrix structures must all be present when Jacobians are needed.
+subroutine ufo_crtm_mixed_sky(conf, channels, atm, sfc, geo, chinfo, options, rts, &
+                              f_comm, zero_cloud, geo_hf, atm_k, sfc_k, rts_k)
+type(crtm_conf), intent(in) :: conf
+integer, intent(in) :: channels(:)
+integer, intent(in) :: zero_cloud(:)
+type(CRTM_Atmosphere_type), intent(in) :: atm(:)
+type(CRTM_Surface_type), intent(in) :: sfc(:)
+type(CRTM_Geometry_type), intent(in) :: geo(:)
+type(CRTM_ChannelInfo_type), intent(in) :: chinfo(:)
+type(CRTM_Options_type), intent(in) :: options(:)
+type(CRTM_RTSolution_type), intent(inout) :: rts(:,:)
+type(fckit_mpi_comm), intent(in) :: f_comm
+type(CRTM_Geometry_type), optional, intent(in) :: geo_hf(:)
+type(CRTM_Atmosphere_type), optional, intent(inout) :: atm_k(:,:)
+type(CRTM_Surface_type), optional, intent(inout) :: sfc_k(:,:)
+type(CRTM_RTSolution_type), optional, intent(inout) :: rts_k(:,:)
+
+type(CRTM_Atmosphere_type), allocatable :: clear_atm(:), clear_atm_k(:,:)
+type(CRTM_Surface_type), allocatable :: clear_sfc_k(:,:)
+type(CRTM_RTSolution_type), allocatable :: clear_rts(:,:), clear_k_rts(:,:), clear_rts_k(:,:)
+type(CRTM_ChannelInfo_type) :: gmi_info(2), clear_chinfo(1)
+integer, allocatable :: clear_channels(:), clear_indices(:), clear_index_by_channel(:)
+logical, allocatable :: is_clear_channel(:)
+integer :: status, n_lo, nchan, nprof, nclear, j, k, nc, nclouds, clear_index
+logical :: need_k
+character(len=*), parameter :: name = "ufo_crtm_mixed_sky"
+
+if (size(conf%clear_sky_channels) == 0) return
+need_k = present(atm_k) .and. present(sfc_k) .and. present(rts_k)
+if ((present(atm_k) .or. present(sfc_k) .or. present(rts_k)) .and. .not. need_k) then
+  call fckit_exception%throw("ufo_crtm_mixed_sky: incomplete K-matrix arguments")
+end if
+nchan = size(channels)
+nprof = size(atm)
+if (nprof == 0) return
+allocate(is_clear_channel(nchan))
+do j = 1, nchan
+  is_clear_channel(j) = any(conf%clear_sky_channels == channels(j))
+end do
+clear_indices = pack([(j, j = 1, nchan)], is_clear_channel)
+clear_channels = pack(channels, is_clear_channel)
+nclear = size(clear_channels)
+allocate(clear_index_by_channel(nchan))
+clear_index_by_channel = 0
+do j = 1, nclear
+  clear_index_by_channel(clear_indices(j)) = j
+end do
+allocate(clear_atm, source=atm)
+clear_atm%n_Clouds = 0
+allocate(clear_rts(nchan,nprof))
+call CRTM_RTSolution_Create(clear_rts, size(atm(1)%Temperature))
+if (need_k .and. nclear > 0) then
+  allocate(clear_atm_k, source=atm_k(clear_indices,:))
+  allocate(clear_sfc_k, source=sfc_k(clear_indices,:))
+  allocate(clear_rts_k, source=rts_k(clear_indices,:))
+  allocate(clear_k_rts(nclear,nprof))
+  call CRTM_RTSolution_Create(clear_k_rts, size(atm(1)%Temperature))
+  call CRTM_Atmosphere_Zero(clear_atm_k)
+  call CRTM_Surface_Zero(clear_sfc_k)
+  call CRTM_RTSolution_Zero(clear_rts_k)
+  clear_rts_k%Brightness_Temperature = 1.0_kind_real
+end if
+
+if (conf%SENSOR_ID(1) == "gmi_gpm") then
+  if (.not. present(geo_hf)) call fckit_exception%throw("ufo_crtm_mixed_sky: missing GMI geometry")
+  call ufo_crtm_gmi_split_chinfo(chinfo(1), channels, gmi_info, n_lo, name, f_comm)
+  if (n_lo > 0) call calculate_forward(1, n_lo, geo, gmi_info(1:1))
+  if (n_lo < nchan) call calculate_forward(n_lo+1, nchan, geo_hf, gmi_info(2:2))
+  call CRTM_ChannelInfo_Destroy(gmi_info)
+  if (need_k .and. nclear > 0) then
+    call ufo_crtm_gmi_split_chinfo(chinfo(1), clear_channels, gmi_info, n_lo, name, f_comm)
+    if (n_lo > 0) call calculate_jacobian(1, n_lo, geo, gmi_info(1:1))
+    if (n_lo < nclear) call calculate_jacobian(n_lo+1, nclear, geo_hf, gmi_info(2:2))
+    call CRTM_ChannelInfo_Destroy(gmi_info)
+  end if
+else
+  call calculate_forward(1, nchan, geo, chinfo)
+  if (need_k .and. nclear > 0) then
+    clear_chinfo(1) = chinfo(1)
+    status = CRTM_ChannelInfo_Subset(clear_chinfo(1), clear_channels)
+    call ufo_crtm_comm_stat_check(status, name, "Error subsetting clear-sky channels", f_comm)
+    call calculate_jacobian(1, nclear, geo, clear_chinfo)
+    call CRTM_ChannelInfo_Destroy(clear_chinfo)
+  end if
+end if
+
+do k = 1, nprof
+  if (options(k)%Skip_Profile) cycle
+  do j = 1, nchan
+    clear_index = clear_index_by_channel(j)
+    if (clear_index > 0) then
+      rts(j,k) = clear_rts(j,k)
+      if (need_k) then
+        nclouds = atm_k(j,k)%n_Clouds
+        atm_k(j,k) = clear_atm_k(clear_index,k)
+        atm_k(j,k)%n_Clouds = nclouds
+        do nc = 1, nclouds
+          atm_k(j,k)%Cloud(nc)%Water_Content = 0.0_kind_real
+        end do
+        sfc_k(j,k) = clear_sfc_k(clear_index,k)
+        rts_k(j,k) = clear_rts_k(clear_index,k)
+      end if
+    end if
+    if (need_k .and. zero_cloud(k) == 1) then
+      do nc = 1, atm_k(j,k)%n_Clouds
+        atm_k(j,k)%Cloud(nc)%Water_Content = 0.0_kind_real
+      end do
+    end if
+    rts(j,k)%Tb_Clear = clear_rts(j,k)%Brightness_Temperature
+  end do
+end do
+call CRTM_RTSolution_Destroy(clear_rts)
+if (need_k .and. nclear > 0) then
+  call CRTM_Atmosphere_Destroy(clear_atm_k)
+  call CRTM_Surface_Destroy(clear_sfc_k)
+  call CRTM_RTSolution_Destroy(clear_rts_k)
+  call CRTM_RTSolution_Destroy(clear_k_rts)
+end if
+call CRTM_Atmosphere_Destroy(clear_atm)
+
+contains
+
+  subroutine calculate_forward(first, last, geometry, info)
+    integer, intent(in) :: first, last
+    type(CRTM_Geometry_type), intent(in) :: geometry(:)
+    type(CRTM_ChannelInfo_type), intent(in) :: info(:)
+    status = CRTM_Forward(clear_atm, sfc, geometry, info, clear_rts(first:last,:), options)
+    call ufo_crtm_comm_stat_check(status, name, "Error calculating clear-sky CRTM", f_comm)
+  end subroutine calculate_forward
+
+  subroutine calculate_jacobian(first, last, geometry, info)
+    integer, intent(in) :: first, last
+    type(CRTM_Geometry_type), intent(in) :: geometry(:)
+    type(CRTM_ChannelInfo_type), intent(in) :: info(:)
+    status = CRTM_K_Matrix(clear_atm, sfc, clear_rts_k(first:last,:), geometry, info, &
+                           clear_atm_k(first:last,:), clear_sfc_k(first:last,:), &
+                           clear_k_rts(first:last,:), options)
+    call ufo_crtm_comm_stat_check(status, name, "Error calculating clear-sky CRTM Jacobian", f_comm)
+  end subroutine calculate_jacobian
+
+end subroutine ufo_crtm_mixed_sky
 
 ! ------------------------------------------------------------------------------
 

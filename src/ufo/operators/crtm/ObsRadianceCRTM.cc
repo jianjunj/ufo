@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -20,6 +21,7 @@
 #include "oops/interface/SampledLocations.h"
 #include "oops/util/abor1_cpp.h"
 #include "oops/util/dateFunctions.h"
+#include "oops/util/IntSetParser.h"
 #include "oops/util/missingValues.h"
 #include "oops/util/TimeWindow.h"
 
@@ -118,8 +120,25 @@ namespace ufo {
 
 // -----------------------------------------------------------------------------
 static ObsOperatorMaker<ObsRadianceCRTM> makerCRTM_("CRTM");
-
 // -----------------------------------------------------------------------------
+
+eckit::LocalConfiguration crtmConfig(const ObsRadianceCRTMParameters & params,
+                                     const std::vector<int> & channels) {
+  eckit::LocalConfiguration conf = params.toConfiguration();
+  if (params.ClearSkyChannels.value() != boost::none) {
+    const std::set<int> selected = oops::parseIntSet(params.ClearSkyChannels.value().value());
+    if (selected.empty() || params.Clouds.value() == boost::none ||
+        params.Clouds.value().value().empty()) {
+      throw eckit::BadParameter("clear sky channels requires a nonempty channel list and Clouds");
+    }
+    for (const int channel : selected) {
+      if (std::find(channels.begin(), channels.end(), channel) == channels.end())
+        throw eckit::BadParameter("clear sky channels contains a channel not in the ObsSpace");
+    }
+    conf.set("clear sky channels", std::vector<int>(selected.begin(), selected.end()));
+  }
+  return conf;
+}
 
 ObsRadianceCRTM::ObsRadianceCRTM(const ioda::ObsSpace & odb,
                                  const Parameters_ & parameters)
@@ -143,7 +162,7 @@ ObsRadianceCRTM::ObsRadianceCRTM(const ioda::ObsSpace & odb,
                                                               std::stoi(day));
 
   // call Fortran setup routine
-  ufo_radiancecrtm_setup_f90(keyOperRadianceCRTM_, parameters_.toConfiguration(),
+  ufo_radiancecrtm_setup_f90(keyOperRadianceCRTM_, crtmConfig(parameters_, channels_list),
                              channels_list.size(), channels_list[0], midPointJulday,
                              varin_, odb.comm());
 

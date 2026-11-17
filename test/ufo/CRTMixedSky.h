@@ -8,7 +8,9 @@
 #ifndef TEST_UFO_CRTMIXEDSKY_H_
 #define TEST_UFO_CRTMIXEDSKY_H_
 
+#include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -29,8 +31,13 @@
 #include "oops/runs/Test.h"
 #include "oops/util/Expect.h"
 #include "oops/util/missingValues.h"
+#include "oops/util/Range.h"
 #include "test/interface/ObsTestsFixture.h"
 #include "test/TestEnvironment.h"
+#include "ufo/GeoVaLs.h"
+#include "ufo/LinearObsOperator.h"
+#include "ufo/ObsBias.h"
+#include "ufo/ObsBiasIncrement.h"
 #include "ufo/ObsTraits.h"
 
 namespace ufo {
@@ -105,6 +112,74 @@ void testMixedSky() {
       }
     }
   }
+
+  ufo::LinearObsOperator linear(space.obsspace(),
+                                conf.getSubConfiguration("obs operator"));
+  ufo::GeoVaLs trajectory(conf.getSubConfiguration("geovals"), space.obsspace(),
+                          linear.requiredVars());
+  ufo::ObsBias linearBias(space.obsspace(),
+                          conf.getSubConfiguration("obs bias"));
+  ufo::ObsBiasIncrement biasIncrement(space.obsspace(),
+                                      conf.getSubConfiguration("obs bias"));
+  linear.setTrajectory(trajectory, linearBias, qc);
+
+  ufo::GeoVaLs cloudWaterIncrement(trajectory);
+  cloudWaterIncrement.zero();
+  const oops::Variable cloudWater(
+      "mass_content_of_cloud_liquid_water_in_atmosphere_layer");
+  std::vector<double> cloudWaterProfile(cloudWaterIncrement.nlevs(cloudWater),
+                                        1.0e-4);
+  for (size_t profile = 0; profile < cloudWaterIncrement.nprofiles(cloudWater);
+       ++profile) {
+    cloudWaterIncrement.putProfile(cloudWaterProfile, cloudWater, profile);
+  }
+
+  ioda::ObsVector tlValues(space.obsspace());
+  tlValues.zero();
+  linear.simulateObsTL(cloudWaterIncrement, tlValues, biasIncrement);
+
+  ioda::ObsVector adjointValues(space.obsspace());
+  adjointValues.zero();
+  const auto channelTwo = std::find(channels.begin(), channels.end(), 2);
+  ASSERT(channelTwo != channels.end());
+  const size_t channelTwoIndex = std::distance(channels.begin(), channelTwo);
+  for (size_t loc = 0; loc < mixedVec.nlocs(); ++loc) {
+    adjointValues[loc * channels.size() + channelTwoIndex] = 1.0;
+  }
+  ufo::GeoVaLs cloudWaterAdjoint(trajectory);
+  cloudWaterAdjoint.zero();
+  linear.simulateObsAD(cloudWaterAdjoint, adjointValues, biasIncrement);
+
+  std::vector<util::Range<size_t>> profilesByLocation;
+  cloudWaterAdjoint.getProfileIndicesGroupedByLocation(cloudWater,
+                                                       profilesByLocation);
+  double unmaskedTL = 0.0;
+  double unmaskedAD = 0.0;
+  for (size_t loc = 0; loc < mixedVec.nlocs(); ++loc) {
+    const size_t channelIndex = loc * channels.size() + channelTwoIndex;
+    if (zeroCloud[loc]) {
+      for (size_t ch = 0; ch < channels.size(); ++ch) {
+        EXPECT(std::abs(tlValues[loc * channels.size() + ch]) < 1.0e-12);
+      }
+    } else {
+      unmaskedTL += std::abs(tlValues[channelIndex]);
+    }
+
+    double adMagnitude = 0.0;
+    for (size_t profile = profilesByLocation[loc].begin;
+         profile < profilesByLocation[loc].end; ++profile) {
+      std::vector<double> profileValues;
+      cloudWaterAdjoint.getProfile(profileValues, cloudWater, profile);
+      for (const double value : profileValues) adMagnitude += std::abs(value);
+    }
+    if (zeroCloud[loc]) {
+      EXPECT(adMagnitude < 1.0e-12);
+    } else {
+      unmaskedAD += adMagnitude;
+    }
+  }
+  EXPECT(unmaskedTL > 1.0e-12);
+  EXPECT(unmaskedAD > 1.0e-12);
 }
 
 class CRTMixedSky : public oops::Test {
